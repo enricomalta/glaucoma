@@ -7,7 +7,7 @@ evolução temporal e gráficos analíticos dos resultados da simulação.
 
 import numpy as np
 from typing import Optional, Dict, List, Tuple
-from scripts.config import FIGURE_DPI, FIGURE_SIZE, COLORMAP_RETINA, COLORMAP_DAMAGE
+from scripts.config import FIGURE_DPI, FIGURE_SIZE, COLORMAP_RETINA, COLORMAP_DAMAGE, SCENARIO_NORMAL, SCENARIO_GLAUCOMA
 from scripts.retina import RetinaSim
 from scripts.simulation import GlaucomaSimulator
 
@@ -294,6 +294,122 @@ class RetinaVisualizer:
         ax.legend()
         ax.grid(True, alpha=0.3, axis="y")
 
+        return fig
+
+    def plot_comparison_scenarios(
+        self,
+        simulators: List,
+        labels: List[str],
+        title: str = "Comparação de Cenários",
+    ) -> Optional[plt.Figure]:
+        """
+        Plota comparação de múltiplos cenários de simulação.
+
+        Exibe IOP e mortalidade de vários simuladores lado a lado para
+        facilitar a análise das diferenças entre cenários.
+
+        Args:
+            simulators (List[GlaucomaSimulator]): Lista de simuladores com histórico.
+            labels (List[str]): Rótulos correspondentes a cada simulador.
+            title (str): Título geral do gráfico.
+
+        Returns:
+            Optional[plt.Figure]: Figura matplotlib ou None.
+        """
+        if not self.matplotlib_available:
+            return None
+
+        colors_iop = ["steelblue", "darkorange", "firebrick", "mediumseagreen"]
+        colors_mort = ["royalblue", "tomato", "crimson", "seagreen"]
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=self.figsize, dpi=self.dpi)
+        fig.suptitle(title, fontsize=14, fontweight="bold")
+
+        for i, (sim, label) in enumerate(zip(simulators, labels)):
+            color_i = colors_iop[i % len(colors_iop)]
+            color_m = colors_mort[i % len(colors_mort)]
+
+            # IOP
+            steps_iop = range(len(sim.iop_history))
+            ax1.plot(steps_iop, sim.iop_history, color=color_i, linewidth=2, label=label)
+
+            # Mortalidade
+            steps_mort = range(len(sim.mortality_history))
+            ax2.plot(steps_mort, sim.mortality_history, color=color_m, linewidth=2, label=label)
+
+        ax1.axhline(y=21, color="red", linestyle="--", linewidth=1, alpha=0.6, label="Limite IOP Normal")
+        ax1.set_ylabel("IOP (mmHg)")
+        ax1.set_title("Pressão Intraocular ao longo do tempo")
+        ax1.legend(loc="upper left")
+        ax1.grid(True, alpha=0.3)
+
+        ax2.set_ylabel("Taxa de Mortalidade")
+        ax2.set_xlabel("Passo de Simulação")
+        ax2.set_title("Mortalidade Celular ao longo do tempo")
+        ax2.legend(loc="upper left")
+        ax2.grid(True, alpha=0.3)
+        ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.1%}"))
+
+        plt.tight_layout()
+        return fig
+
+    def plot_cell_survival_comparison(
+        self,
+        simulators: List,
+        retinas: List,
+        labels: List[str],
+        title: str = "Sobrevivência Celular por Cenário",
+    ) -> Optional[plt.Figure]:
+        """
+        Plota barras de sobrevivência celular final de múltiplos cenários.
+
+        Args:
+            simulators (List): Lista de simuladores.
+            retinas (List): Lista de retinas correspondentes.
+            labels (List[str]): Rótulos dos cenários.
+            title (str): Título do gráfico.
+
+        Returns:
+            Optional[plt.Figure]: Figura ou None.
+        """
+        if not self.matplotlib_available:
+            return None
+
+        fig, axes = plt.subplots(1, 2, figsize=self.figsize, dpi=self.dpi)
+        fig.suptitle(title, fontsize=14, fontweight="bold")
+
+        # Dados de cada cenário
+        alive_counts = [r.get_alive_cells_count() for r in retinas]
+        dead_counts = [r.get_dead_cells_count() for r in retinas]
+        health_means = [r.get_average_health() for r in retinas]
+
+        colors_alive = ["mediumseagreen", "darkorange", "tomato", "gold"][: len(labels)]
+        colors_health = ["steelblue", "darkorange", "firebrick", "goldenrod"][: len(labels)]
+
+        # Barras de sobrevivência
+        x = np.arange(len(labels))
+        width = 0.35
+        axes[0].bar(x - width / 2, alive_counts, width, label="Vivas", color="mediumseagreen")
+        axes[0].bar(x + width / 2, dead_counts, width, label="Mortas", color="tomato")
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels(labels, rotation=15, ha="right")
+        axes[0].set_ylabel("Número de Células")
+        axes[0].set_title("Contagem Final de Células")
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3, axis="y")
+
+        # Saúde média
+        axes[1].bar(labels, health_means, color=colors_health)
+        axes[1].set_ylabel("Saúde Média")
+        axes[1].set_title("Saúde Média Final das Células Vivas")
+        axes[1].set_ylim(0, 1.05)
+        for idx, v in enumerate(health_means):
+            axes[1].text(idx, v + 0.01, f"{v:.1%}", ha="center", fontsize=10)
+        axes[1].set_xticks(range(len(labels)))
+        axes[1].set_xticklabels(labels, rotation=15, ha="right")
+        axes[1].grid(True, alpha=0.3, axis="y")
+
+        plt.tight_layout()
         return fig
 
     def save_figure(self, fig: plt.Figure, filepath: str) -> None:

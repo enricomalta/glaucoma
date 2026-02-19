@@ -1,20 +1,22 @@
 """
-Script Principal - Exemplo de uso completo do projeto.
+Script Principal - Demonstração Comparativa de Cenários de Glaucoma.
 
-Este script demonstra como usar os módulos do projeto para:
-1. Criar uma retina simulada,
-2. Executar simulação de glaucoma,
-3. Treinar modelo de IA,
-4. Visualizar resultados.
+Executa três cenários em sequência:
+  1. Paciente saudável (IOP normal)
+  2. Glaucoma moderado sem tratamento
+  3. Glaucoma moderado com tratamento (iniciado no meio da simulação)
 """
 
-import sys
 import os
+import sys
 
-# Adiciona o diretório raiz ao path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from scripts.config import get_config
+from scripts.config import (
+    get_config,
+    SCENARIO_NORMAL,
+    SCENARIO_GLAUCOMA,
+)
 from scripts.retina import RetinaSim
 from scripts.simulation import GlaucomaSimulator
 from scripts.ai_model import GlaucomaPredictor, SimplePredictor, TENSORFLOW_AVAILABLE
@@ -22,153 +24,212 @@ from scripts.visualization import RetinaVisualizer
 from utils import print_banner, save_simulation_results, create_directories_if_not_exist
 
 
+# ---------------------------------------------------------------------------
+# Número de passos para cada simulação (aumente para 500+ para maior detalhamento)
+NUM_STEPS = 200
+LOG_INTERVAL = 50
+TREATMENT_STEP = 100  # Passo em que o tratamento é iniciado no cenário 3
+# ---------------------------------------------------------------------------
+
+
+def run_scenario(
+    label: str,
+    initial_iop: float,
+    num_steps: int,
+    treatment_at: int = 0,
+    seed_offset: int = 0,
+) -> tuple:
+    """
+    Executa um cenário completo de simulação.
+
+    Args:
+        label (str): Nome do cenário para exibição.
+        initial_iop (float): IOP inicial em mmHg.
+        num_steps (int): Passos de simulação.
+        treatment_at (int): Passo em que o tratamento é ativado (0 = nunca).
+        seed_offset (int): Offset para diferenciar seeds entre cenários.
+
+    Returns:
+        tuple: (GlaucomaSimulator, RetinaSim)
+    """
+    import numpy as np
+    np.random.seed(42 + seed_offset)
+
+    retina = RetinaSim()
+    sim = GlaucomaSimulator(retina, initial_iop=initial_iop)
+
+    print(f"\n  [{label}] IOP inicial: {initial_iop:.1f} mmHg")
+
+    for step in range(num_steps):
+        result = sim.step()
+
+        if treatment_at and step == treatment_at:
+            sim.apply_treatment(effectiveness=0.85)
+            print(f"  [{label}] Tratamento iniciado no passo {step}  (IOP: {sim.current_iop:.1f} mmHg)")
+
+        if (step + 1) % LOG_INTERVAL == 0:
+            print(
+                f"  [{label}] Step {step + 1}: "
+                f"IOP={result['iop']:.1f} mmHg | "
+                f"Vivas={result['total_alive_cells']:,} | "
+                f"Mortalidade={result['mortality_rate']:.2%}"
+            )
+
+    return sim, retina
+
+
 def main():
     """Função principal do projeto."""
-    
+
     print_banner("SIMULADOR DE RETINA 3D COM GLAUCOMA")
-    
-    # ========================================================================
-    # 1. CARREGAR CONFIGURAÇÃO
-    # ========================================================================
-    print("\n1. Carregando configuração...")
+
     config = get_config()
-    print(f"   ✓ Total de células: {config['retina']['total_cells']:,}")
-    print(f"   ✓ Pressão inicial: {config['physics']['initial_iop']} mmHg")
-    print(f"   ✓ Duração da simulação: {config['simulation']['duration']:.1f} unidades")
+    results_dir = config["directories"]["results"]
+    create_directories_if_not_exist([results_dir])
 
     # ========================================================================
-    # 2. CRIAR RETINA SIMULADA
+    # 1. CONFIGURAÇÃO
     # ========================================================================
-    print("\n2. Criando retina simulada...")
-    retina = RetinaSim(
-        width=config["retina"]["width"],
-        height=config["retina"]["height"],
-        depth=config["retina"]["depth"],
-        num_cells=config["retina"]["total_cells"],
-    )
-    print(f"   ✓ Retina criada: {retina}")
-    
-    # Estatísticas iniciais
-    stats = retina.get_statistics()
-    print(f"   ✓ Saúde média inicial: {stats['average_health']:.2%}")
+    print("\n1. Configuração carregada")
+    print(f"   Total de células por simulação: {config['retina']['total_cells']:,}")
+    print(f"   Passos por simulação: {NUM_STEPS}")
 
     # ========================================================================
-    # 3. EXECUTAR SIMULAÇÃO DE GLAUCOMA
+    # 2. EXECUTAR OS 3 CENÁRIOS
     # ========================================================================
-    print("\n3. Executando simulação de glaucoma...")
-    simulator = GlaucomaSimulator(
-        retina=retina,
-        initial_iop=config["physics"]["initial_iop"],
+    print(f"\n2. Executando simulações ({NUM_STEPS} passos cada)...")
+
+    sim_normal, retina_normal = run_scenario(
+        label=SCENARIO_NORMAL["label"],
+        initial_iop=SCENARIO_NORMAL["initial_iop"],
+        num_steps=NUM_STEPS,
+        seed_offset=0,
     )
 
-    # Simula 100 passos
-    num_steps = 100
-    results = simulator.run_simulation(num_steps=num_steps, log_interval=25)
+    sim_glaucoma, retina_glaucoma = run_scenario(
+        label=SCENARIO_GLAUCOMA["label"],
+        initial_iop=SCENARIO_GLAUCOMA["initial_iop"],
+        num_steps=NUM_STEPS,
+        seed_offset=1,
+    )
 
-    # Sumário
-    summary = simulator.get_summary()
-    print(f"\n   Sumário da Simulação:")
-    print(f"   ✓ IOP final: {summary['final_iop']:.2f} mmHg")
-    print(f"   ✓ Taxa de mortalidade final: {summary['final_mortality_rate']:.2%}")
-    print(f"   ✓ Células vivas: {summary['alive_cells']}/{summary['total_cells']}")
-    print(f"   ✓ Saúde média final: {summary['final_average_health']:.2%}")
+    sim_treated, retina_treated = run_scenario(
+        label="Glaucoma + Tratamento",
+        initial_iop=SCENARIO_GLAUCOMA["initial_iop"],
+        num_steps=NUM_STEPS,
+        treatment_at=TREATMENT_STEP,
+        seed_offset=2,
+    )
 
     # ========================================================================
-    # 4. TREINAR MODELO DE IA
+    # 3. SUMÁRIO COMPARATIVO
     # ========================================================================
-    print("\n4. Inicializando modelo de IA...")
+    print("\n3. Sumário Comparativo")
+    print(f"   {'Cenário':<30} {'IOP Final':>10} {'Mortalidade':>12} {'Saúde Média':>12}")
+    print(f"   {'-'*30} {'-'*10} {'-'*12} {'-'*12}")
+
+    for label, sim in [
+        (SCENARIO_NORMAL["label"], sim_normal),
+        (SCENARIO_GLAUCOMA["label"], sim_glaucoma),
+        ("Glaucoma + Tratamento", sim_treated),
+    ]:
+        s = sim.get_summary()
+        print(
+            f"   {label:<30} "
+            f"{s['final_iop']:>9.1f}  "
+            f"{s['final_mortality_rate']:>11.2%}  "
+            f"{s['final_average_health']:>11.2%}"
+        )
+
+    # ========================================================================
+    # 4. MODELO DE IA
+    # ========================================================================
+    print("\n4. Modelo de IA...")
 
     if TENSORFLOW_AVAILABLE:
         try:
             predictor = GlaucomaPredictor()
-            print("   ✓ Modelo de rede neural criado")
-
-            print("   Treinando modelo (epochs reduzido para demo)...")
-            predictor.config.epochs = 5
+            predictor.config.epochs = 10
             predictor.train(use_synthetic=True)
-            print("   ✓ Treinamento concluído")
-
+            model_path = os.path.join(config["directories"]["models"], "glaucoma_model.keras")
+            predictor.save_model(model_path)
+            print(f"   ✓ Modelo treinado e salvo em models/")
         except Exception as e:
-            print(f"   ⚠ Erro no modelo neural: {e}")
-            print("   Usando SimplePredictor como alternativa...")
+            print(f"   ⚠ Erro no treino: {e} — usando SimplePredictor")
             predictor = SimplePredictor()
     else:
-        print("   ⚠ TensorFlow não encontrado. Usando SimplePredictor...")
         predictor = SimplePredictor()
 
-        # Predição demonstrativa
-        test_prediction = predictor.predict_from_iop(summary['final_iop'])
-        print(f"   ✓ Predição para IOP {summary['final_iop']:.1f} mmHg:")
-        for key, value in test_prediction.items():
-            print(f"      - {key}: {value:.2%}")
+    print("\n   Predições para IOP final de cada cenário:")
+    print(f"\n   {'Cenário':<30} {'IOP':>6} {'Progressão':>12} {'Vitalidade':>12} {'Risco':>8}")
+    print(f"   {'-'*30} {'-'*6} {'-'*12} {'-'*12} {'-'*8}")
+    for label, sim in [
+        (SCENARIO_NORMAL["label"], sim_normal),
+        (SCENARIO_GLAUCOMA["label"], sim_glaucoma),
+        ("Glaucoma + Tratamento", sim_treated),
+    ]:
+        s = sim.get_summary()
+        iop = s["final_iop"]
+        mort = s["final_mortality_rate"]
+        pred = predictor.predict_from_iop(iop, mort) if hasattr(predictor, "predict_from_iop") else {}
+        if pred:
+            print(
+                f"   {label:<30} {iop:>5.1f}  "
+                f"{pred['glaucoma_progression']:>11.1%}  "
+                f"{pred['cell_vitality']:>11.1%}  "
+                f"{pred['risk_level']:>7.1%}"
+            )
 
     # ========================================================================
-    # 5. VISUALIZAR RESULTADOS
+    # 5. VISUALIZAÇÕES
     # ========================================================================
     print("\n5. Gerando visualizações...")
-    
-    try:
-        visualizer = RetinaVisualizer()
 
-        # Cria diretório de resultados
-        results_dir = config["directories"]["results"]
-        create_directories_if_not_exist([results_dir])
+    visualizer = RetinaVisualizer()
+    saved = []
 
-        # Gera gráficos
-        print("   Gerando gráficos...")
-        
-        fig1 = visualizer.plot_retina_3d(retina, title="Retina 3D - Final da Simulação")
-        if fig1:
-            visualizer.save_figure(fig1, os.path.join(results_dir, "retina_3d.png"))
-            print(f"   ✓ Salvo: retina_3d.png")
+    simulators = [sim_normal, sim_glaucoma, sim_treated]
+    retinas = [retina_normal, retina_glaucoma, retina_treated]
+    labels = [SCENARIO_NORMAL["label"], SCENARIO_GLAUCOMA["label"], "Glaucoma + Tratamento"]
 
-        fig2 = visualizer.plot_health_heatmap_2d(retina, title="Mapa de Saúde Celular")
-        if fig2:
-            visualizer.save_figure(fig2, os.path.join(results_dir, "health_heatmap.png"))
-            print(f"   ✓ Salvo: health_heatmap.png")
+    def save(fig, name):
+        if fig:
+            path = os.path.join(results_dir, name)
+            visualizer.save_figure(fig, path)
+            saved.append(name)
 
-        fig3 = visualizer.plot_timeline(simulator, show_metrics=["iop", "mortality_rate"])
-        if fig3:
-            visualizer.save_figure(fig3, os.path.join(results_dir, "timeline.png"))
-            print(f"   ✓ Salvo: timeline.png")
+    save(visualizer.plot_comparison_scenarios(simulators, labels), "comparison_iop_mortality.png")
+    save(visualizer.plot_cell_survival_comparison(simulators, retinas, labels), "comparison_cell_survival.png")
+    save(visualizer.plot_retina_3d(retina_glaucoma, title="Retina 3D — Glaucoma Moderado"), "retina_3d_glaucoma.png")
+    save(visualizer.plot_retina_3d(retina_treated, title="Retina 3D — Com Tratamento"), "retina_3d_treated.png")
+    save(visualizer.plot_timeline(sim_glaucoma, show_metrics=["iop", "mortality_rate"],
+                                  title="Evolução — Glaucoma Sem Tratamento"), "timeline_glaucoma.png")
+    save(visualizer.plot_timeline(sim_treated, show_metrics=["iop", "mortality_rate"],
+                                  title="Evolução — Glaucoma Com Tratamento"), "timeline_treated.png")
+    save(visualizer.plot_cell_type_distribution(retina_glaucoma), "cell_distribution_glaucoma.png")
 
-        fig4 = visualizer.plot_cell_type_distribution(retina)
-        if fig4:
-            visualizer.save_figure(fig4, os.path.join(results_dir, "cell_distribution.png"))
-            print(f"   ✓ Salvo: cell_distribution.png")
-
-        fig5 = visualizer.plot_iop_distribution(simulator.iop_history)
-        if fig5:
-            visualizer.save_figure(fig5, os.path.join(results_dir, "iop_distribution.png"))
-            print(f"   ✓ Salvo: iop_distribution.png")
-
-    except ImportError:
-        print("   ⚠ Matplotlib não disponível. Pulando visualizações...")
+    print(f"\n   {len(saved)} gráfico(s) salvos em results/")
 
     # ========================================================================
-    # 6. SALVAR RESULTADOS
+    # 6. SALVAR RESULTADOS JSON
     # ========================================================================
-    print("\n6. Salvando resultados...")
-    
-    results_file = os.path.join(config["directories"]["results"], "simulation_results.json")
-    save_simulation_results(summary, results_file, format="json")
-    print(f"   ✓ Resultados salvos em: {results_file}")
+    print("\n6. Salvando resultados JSON...")
+    for label, sim in zip(labels, simulators):
+        filename = label.lower().replace(" ", "_").replace("+", "com") + ".json"
+        save_simulation_results(sim.get_summary(), os.path.join(results_dir, filename))
 
     # ========================================================================
-    # FINALIZAÇÃO
+    # CONCLUSÃO
     # ========================================================================
     print_banner("SIMULAÇÃO CONCLUÍDA COM SUCESSO!")
-    
-    print("\nArtefatos gerados:")
-    print(f"  📊 Gráficos: {config['directories']['results']}/")
-    print(f"  📄 Dados: {config['directories']['data']}/")
-    print(f"  🤖 Modelos: {config['directories']['models']}/")
-    
+    print("\nGráficos gerados em results/:")
+    for name in saved:
+        print(f"  📊 {name}")
+
     print("\nPróximos passos:")
-    print("  1. Verificar os gráficos gerados em results/")
-    print("  2. Analisar dados da simulação")
-    print("  3. Ajustar parâmetros em scripts/config.py")
-    print("  4. Treinar modelo com dados reais")
+    print("  → Abrir notebooks/02_comparativo_tratamento.ipynb para análise interativa")
+    print("  → Ajustar NUM_STEPS e TREATMENT_STEP no topo de main.py")
+    print("  → Aumentar EPOCHS em ai_model.py para treino mais profundo")
 
 
 if __name__ == "__main__":

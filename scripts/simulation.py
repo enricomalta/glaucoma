@@ -44,6 +44,7 @@ class GlaucomaSimulator:
             simulation_step (int): Passo inicial de simulação.
         """
         self.retina = retina
+        self.initial_iop = initial_iop
         self.current_iop = initial_iop
         self.simulation_step = simulation_step
         self.iop_history: List[float] = [initial_iop]
@@ -84,12 +85,16 @@ class GlaucomaSimulator:
         # Ruído aleatório para simular flutuações naturais
         noise = np.random.normal(0, NOISE_LEVEL)
 
-        # Mudança determinística (possível progressão do glaucoma)
-        # Aumenta levemente a cada passo se sem tratamento
+        # Mean-reversion: IOP tende a voltar para o valor inicial
+        # (com leve deriva se não tratado, redução se tratado)
         if not self.treatment_active:
-            deterministic_change = 0.05
+            # Pequena pressão crescente + reversão parcial ao valor base
+            target = self.initial_iop + 2.0  # deriva leve ao longo do tempo
+            deterministic_change = 0.05 * (target - self.current_iop) + 0.01
         else:
-            deterministic_change = -0.1  # Reduz com tratamento
+            # Com tratamento: convergir para faixa normal (21 mmHg)
+            target = NORMAL_IOP_RANGE[1]
+            deterministic_change = 0.15 * (target - self.current_iop)
 
         self.current_iop = max(5.0, self.current_iop + deterministic_change + noise)
         self.iop_history.append(self.current_iop)
@@ -113,20 +118,19 @@ class GlaucomaSimulator:
         # Calcula quantas células podem sofrer dano
         cells_at_risk = int(alive_cells * death_rate)
 
-        # Seleciona células aleatoriamente para dano
-        alive_cell_ids = [
-            i for i, cell in enumerate(self.retina.cells) if cell.is_alive
-        ]
+        # Seleciona células aleatoriamente para dano (numpy array para performance)
+        alive_cell_ids = np.array(
+            [i for i, cell in enumerate(self.retina.cells) if cell.is_alive]
+        )
 
+        # Seleciona células sem reposição (numpy, O(k) em vez de O(n*k))
+        n_select = min(cells_at_risk, len(alive_cell_ids))
         cells_killed = 0
-        for _ in range(cells_at_risk):
-            if alive_cell_ids:
-                cell_id = np.random.choice(alive_cell_ids)
-                alive_cell_ids.remove(cell_id)
-
-                # Aplica dano incremental
-                damage = np.random.uniform(0.1, 0.5)
-                if self.retina.damage_cell(cell_id, damage):
+        if n_select > 0:
+            chosen = np.random.choice(alive_cell_ids, size=n_select, replace=False)
+            damages = np.random.uniform(0.1, 0.5, size=n_select)
+            for cell_id, damage in zip(chosen, damages):
+                if self.retina.damage_cell(int(cell_id), damage):
                     cells_killed += 1
 
         return cells_killed

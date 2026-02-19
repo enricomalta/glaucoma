@@ -245,6 +245,42 @@ class GlaucomaPredictor:
             self.model = keras.models.load_model(filepath)
             print(f"Modelo carregado de: {filepath}")
 
+    def predict_from_iop(self, iop: float, mortality_rate: float = 0.0) -> Dict[str, float]:
+        """
+        Prediz progressão de glaucoma a partir de IOP (e opcionalmente mortalidade).
+
+        Constrói o vetor de entrada esperado pelo modelo e retorna
+        um dicionário com as mesmas chaves de SimplePredictor.
+
+        Args:
+            iop (float): Pressão intraocular em mmHg.
+            mortality_rate (float): Taxa de mortalidade acumulada [0-1].
+
+        Returns:
+            Dict[str, float]: {glaucoma_progression, cell_vitality, risk_level}
+        """
+        if not TENSORFLOW_AVAILABLE or self.model is None:
+            # Fallback para regas simples se o modelo não estiver disponível
+            normalized_iop = np.clip((iop - 10) / 40, 0, 1)
+            return {
+                "glaucoma_progression": float(normalized_iop),
+                "cell_vitality": float(max(0, 1 - normalized_iop)),
+                "risk_level": float(np.clip(normalized_iop * 1.5, 0, 1)),
+            }
+
+        # Monta vetor de entrada na mesma ordem do treinamento sintético:
+        # feature[0] = IOP, feature[1] = mortalidade, restante = 0
+        X = np.zeros((1, self.config.input_size), dtype=np.float32)
+        X[0, 0] = float(iop)
+        X[0, 1] = float(mortality_rate)
+
+        preds = self.model.predict(X, verbose=0)[0]  # shape (output_size,)
+        return {
+            "glaucoma_progression": float(np.clip(preds[0], 0, 1)),
+            "cell_vitality":        float(np.clip(preds[1], 0, 1)),
+            "risk_level":           float(np.clip(preds[2], 0, 1)),
+        }
+
 
 class SimplePredictor:
     """

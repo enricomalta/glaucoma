@@ -6,7 +6,12 @@ de retina 3D com glaucoma, incluindo dimensões, propriedades físicas e
 parâmetros de simulação.
 """
 
+import os
 from typing import Dict, Any
+
+# Suprimir warnings verbosos do TensorFlow (oneDNN)
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 # ============================================================================
 # PARÂMETROS DE GEOMETRIA DA RETINA
@@ -38,19 +43,44 @@ NORMAL_IOP_RANGE: tuple = (10.0, 21.0)  # Faixa de pressão normal
 GLAUCOMATOUS_IOP_THRESHOLD: float = 21.0  # Limite para pressão elevada
 
 # Taxa de perda celular sob diferentes pressões
-CELL_DEATH_RATE_NORMAL: float = 0.001  # Taxa normal de apoptose
-CELL_DEATH_RATE_ELEVATED_IOP: float = 0.05  # Taxa elevada com pressão alta
-CELL_DEATH_RATE_SEVERE: float = 0.15  # Taxa severa com pressão muito alta
+CELL_DEATH_RATE_NORMAL: float = 0.0002       # Taxa normal de apoptose (~4% em 200 passos)
+CELL_DEATH_RATE_ELEVATED_IOP: float = 0.005  # Taxa elevada — IOP 21-30 mmHg (~39% em 100 passos)
+CELL_DEATH_RATE_SEVERE: float = 0.02          # Taxa severa — IOP >30 mmHg (~86% em 100 passos)
 
 # Limiar de pressão para dano celular acelerado
 PRESSURE_DAMAGE_THRESHOLD: float = 30.0  # mmHg
+
+# ============================================================================
+# CENÁRIOS PREDEFINIDOS DE SIMULAÇÃO
+# ============================================================================
+
+# Paciente saudável (IOP normal)
+SCENARIO_NORMAL: Dict[str, float] = {
+    "initial_iop": 15.0,
+    "label": "Paciente Saudável",
+    "description": "IOP normal (15 mmHg), sem glaucoma",
+}
+
+# Paciente com glaucoma moderado
+SCENARIO_GLAUCOMA: Dict[str, float] = {
+    "initial_iop": 28.0,
+    "label": "Glaucoma Moderado",
+    "description": "IOP elevada (28 mmHg), sem tratamento",
+}
+
+# Paciente com glaucoma severo
+SCENARIO_SEVERE: Dict[str, float] = {
+    "initial_iop": 38.0,
+    "label": "Glaucoma Severo",
+    "description": "IOP muito elevada (38 mmHg), dano acelerado",
+}
 
 # ============================================================================
 # PARÂMETROS DE SIMULAÇÃO
 # ============================================================================
 
 # Configurações temporais
-TIME_STEPS: int = 1000  # Número de passos temporais na simulação
+TIME_STEPS: int = 200   # Número de passos padrão para demo
 DELTA_TIME: float = 0.1  # Intervalo de tempo entre passos (em unidades virtuais)
 SIMULATION_DURATION: float = TIME_STEPS * DELTA_TIME  # Duração total
 
@@ -91,8 +121,6 @@ COLORMAP_DAMAGE: str = "hot"  # Colormap para mapa de dano
 # ============================================================================
 # DIRETÓRIOS
 # ============================================================================
-
-import os
 
 PROJECT_ROOT: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR: str = os.path.join(PROJECT_ROOT, "data")
